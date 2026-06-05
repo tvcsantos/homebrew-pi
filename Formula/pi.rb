@@ -10,7 +10,9 @@ class Pi < Formula
     regex(/"version"\s*:\s*"([^"]+)"/i)
   end
 
+  depends_on "fd"
   depends_on "node"
+  depends_on "ripgrep"
 
   def install
     # Pi publishes npm-shrinkwrap.json, so we can safely bypass npm's
