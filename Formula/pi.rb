@@ -13,7 +13,9 @@ class Pi < Formula
   depends_on "node"
 
   def install
-    system "npm", "install", *std_npm_args
+    # Pi publishes npm-shrinkwrap.json, so we can safely bypass npm's
+    # release-age gate without reopening transitive dependency ranges.
+    system "npm", "install", *std_npm_args, "--min-release-age=0"
     bin.install_symlink libexec.glob("bin/*")
   end
 
