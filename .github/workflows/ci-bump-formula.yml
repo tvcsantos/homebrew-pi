@@ -1,0 +1,60 @@
+name: Bump formula on new release
+
+on:
+  schedule:
+    # Every day at 8:00 UTC
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for new version
+        id: check
+        run: |
+          CURRENT_URL=$(grep -oP '^\s*url\s+"\K[^"]+' Formula/pi.rb)
+          CURRENT_VERSION=$(echo "$CURRENT_URL" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+(?=\.tgz)')
+          REGISTRY_URL=$(echo "$CURRENT_URL" | sed 's|-/.*|latest|')
+          LATEST_VERSION=$(curl -fsSL "$REGISTRY_URL" | jq -r '.version')
+
+          echo "current_url=$CURRENT_URL" >> "$GITHUB_OUTPUT"
+          echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+            echo "Formula is up to date ($CURRENT_VERSION)"
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version available: $CURRENT_VERSION -> $LATEST_VERSION"
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update formula
+        if: steps.check.outputs.needs_update == 'true'
+        env:
+          NEW_VERSION: ${{ steps.check.outputs.latest }}
+          OLD_VERSION: ${{ steps.check.outputs.current }}
+          CURRENT_URL: ${{ steps.check.outputs.current_url }}
+        run: |
+          NEW_URL=$(echo "$CURRENT_URL" | sed "s|${OLD_VERSION}|${NEW_VERSION}|g")
+          NEW_SHA256=$(curl -fsSL "$NEW_URL" | shasum -a 256 | awk '{print $1}')
+
+          sed -i "s|${OLD_VERSION}|${NEW_VERSION}|g" Formula/pi.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${NEW_SHA256}\"|" Formula/pi.rb
+
+      - name: Create pull request
+        if: steps.check.outputs.needs_update == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bump-pi-${{ steps.check.outputs.latest }}
+          commit-message: "chore: update from ${{ steps.check.outputs.current }} to ${{ steps.check.outputs.latest }}"
+          title: "chore: update from ${{ steps.check.outputs.current }} to ${{ steps.check.outputs.latest }}"
+          body: "Automated bump of `pi` formula to [v${{ steps.check.outputs.latest }}](https://www.npmjs.com/package/@earendil-works/pi-coding-agent/v/${{ steps.check.outputs.latest }})."
