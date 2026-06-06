@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   bump:
+    name: Bump
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,10 +23,14 @@ jobs:
         run: |
           CURRENT_URL=$(grep -oP '^\s*url\s+"\K[^"]+' Formula/pi.rb)
           CURRENT_VERSION=$(echo "$CURRENT_URL" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+(?=\.tgz)')
-          REGISTRY_URL=$(echo "$CURRENT_URL" | sed 's|-/.*|latest|')
-          LATEST_VERSION=$(curl -fsSL "$REGISTRY_URL" | jq -r '.version')
+          PACKAGE_NAME=$(echo "$CURRENT_URL" | sed -n 's|.*/\(@[^/]*/[^/]*\)/-/.*|\1|p')
+          LATEST_VERSION=$(npm view "$PACKAGE_NAME" version)
 
-          echo "current_url=$CURRENT_URL" >> "$GITHUB_OUTPUT"
+          if [ -z "$CURRENT_VERSION" ] || [ -z "$LATEST_VERSION" ]; then
+            echo "Failed to determine versions (current=$CURRENT_VERSION, latest=$LATEST_VERSION)"
+            exit 1
+          fi
+
           echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "latest=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -42,12 +47,13 @@ jobs:
         env:
           NEW_VERSION: ${{ steps.check.outputs.latest }}
           OLD_VERSION: ${{ steps.check.outputs.current }}
-          CURRENT_URL: ${{ steps.check.outputs.current_url }}
         run: |
-          NEW_URL=$(echo "$CURRENT_URL" | sed "s|${OLD_VERSION}|${NEW_VERSION}|g")
-          NEW_SHA256=$(curl -fsSL "$NEW_URL" | shasum -a 256 | awk '{print $1}')
+          CURRENT_URL=$(grep -oP '^\s*url\s+"\K[^"]+' Formula/pi.rb)
+          PACKAGE_NAME=$(echo "$CURRENT_URL" | sed -n 's|.*/\(@[^/]*/[^/]*\)/-/.*|\1|p')
+          NEW_URL=$(npm view "${PACKAGE_NAME}@${NEW_VERSION}" dist.tarball)
+          NEW_SHA256=$(wget -qO- "$NEW_URL" | shasum -a 256 | awk '{print $1}')
 
-          sed -i "s|${OLD_VERSION}|${NEW_VERSION}|g" Formula/pi.rb
+          sed -i "s|${CURRENT_URL}|${NEW_URL}|" Formula/pi.rb
           sed -i "s|sha256 \".*\"|sha256 \"${NEW_SHA256}\"|" Formula/pi.rb
 
       - name: Create pull request
