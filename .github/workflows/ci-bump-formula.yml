@@ -25,7 +25,6 @@ jobs:
           REGISTRY_URL=$(echo "$CURRENT_URL" | sed 's|-/.*|latest|')
           LATEST_VERSION=$(curl -fsSL "$REGISTRY_URL" | jq -r '.version')
 
-          echo "current_url=$CURRENT_URL" >> "$GITHUB_OUTPUT"
           echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "latest=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -42,8 +41,8 @@ jobs:
         env:
           NEW_VERSION: ${{ steps.check.outputs.latest }}
           OLD_VERSION: ${{ steps.check.outputs.current }}
-          CURRENT_URL: ${{ steps.check.outputs.current_url }}
         run: |
+          CURRENT_URL=$(grep -oP '^\s*url\s+"\K[^"]+' Formula/pi.rb)
           NEW_URL=$(echo "$CURRENT_URL" | sed "s|${OLD_VERSION}|${NEW_VERSION}|g")
           NEW_SHA256=$(curl -fsSL "$NEW_URL" | shasum -a 256 | awk '{print $1}')
 
