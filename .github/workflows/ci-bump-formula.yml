@@ -18,49 +18,77 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check for new version
-        id: check
-        run: |
-          CURRENT_URL=$(grep -oP '^\s*url\s+"\K[^"]+' Formula/pi.rb)
-          CURRENT_VERSION=$(echo "$CURRENT_URL" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+(?=\.tgz)')
-          PACKAGE_NAME=$(echo "$CURRENT_URL" | sed -n 's|.*/\(@[^/]*/[^/]*\)/-/.*|\1|p')
-          LATEST_VERSION=$(npm view "$PACKAGE_NAME" version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+')
+      - name: Check and update formula
+        id: update
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const https = require('https');
 
-          if [ -z "$CURRENT_VERSION" ] || [ -z "$LATEST_VERSION" ]; then
-            echo "Failed to determine versions (current=$CURRENT_VERSION, latest=$LATEST_VERSION)"
-            exit 1
-          fi
+            function fetch(url) {
+              return new Promise((resolve, reject) => {
+                https.get(url, (res) => {
+                  if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    return resolve(fetch(res.headers.location));
+                  }
+                  const chunks = [];
+                  res.on('data', chunk => chunks.push(chunk));
+                  res.on('end', () => resolve(Buffer.concat(chunks)));
+                  res.on('error', reject);
+                }).on('error', reject);
+              });
+            }
 
-          echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "latest=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+            async function sha256(buffer) {
+              const crypto = require('crypto');
+              return crypto.createHash('sha256').update(buffer).digest('hex');
+            }
 
-          if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
-            echo "Formula is up to date ($CURRENT_VERSION)"
-            echo "needs_update=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New version available: $CURRENT_VERSION -> $LATEST_VERSION"
-            echo "needs_update=true" >> "$GITHUB_OUTPUT"
-          fi
+            const formula = fs.readFileSync('Formula/pi.rb', 'utf8');
 
-      - name: Update formula
-        if: steps.check.outputs.needs_update == 'true'
-        env:
-          NEW_VERSION: ${{ steps.check.outputs.latest }}
-          OLD_VERSION: ${{ steps.check.outputs.current }}
-        run: |
-          CURRENT_URL=$(grep -oP '^\s*url\s+"\K[^"]+' Formula/pi.rb)
-          PACKAGE_NAME=$(echo "$CURRENT_URL" | sed -n 's|.*/\(@[^/]*/[^/]*\)/-/.*|\1|p')
-          NEW_URL=$(npm view "${PACKAGE_NAME}@${NEW_VERSION}" dist.tarball 2>/dev/null | grep -oP 'https://[^\s]+')
-          NEW_SHA256=$(wget -qO- "$NEW_URL" | shasum -a 256 | awk '{print $1}')
+            const currentUrlMatch = formula.match(/^\s*url\s+"([^"]+)"/m);
+            if (!currentUrlMatch) throw new Error('Could not find url in formula');
+            const currentUrl = currentUrlMatch[1];
 
-          sed -i "s|${CURRENT_URL}|${NEW_URL}|" Formula/pi.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${NEW_SHA256}\"|" Formula/pi.rb
+            const currentVersionMatch = currentUrl.match(/(\d+\.\d+\.\d+)\.tgz$/);
+            if (!currentVersionMatch) throw new Error('Could not parse version from url');
+            const currentVersion = currentVersionMatch[1];
+
+            const packageNameMatch = currentUrl.match(/registry\.npmjs\.org\/([^/]+\/[^/]+)\/-\//);
+            if (!packageNameMatch) throw new Error('Could not parse package name from url');
+            const packageName = packageNameMatch[1];
+
+            const registryData = JSON.parse(await fetch(`https://registry.npmjs.org/${packageName}/latest`));
+            const latestVersion = registryData.version;
+            const newUrl = registryData.dist.tarball;
+
+            core.info(`Current: ${currentVersion}, Latest: ${latestVersion}`);
+
+            if (currentVersion === latestVersion) {
+              core.info('Formula is up to date');
+              core.setOutput('needs_update', 'false');
+              return;
+            }
+
+            core.info(`Updating ${currentVersion} -> ${latestVersion}`);
+            const tarball = await fetch(newUrl);
+            const newSha256 = await sha256(tarball);
+
+            const updated = formula
+              .replace(currentUrl, newUrl)
+              .replace(/sha256 "[^"]+"/, `sha256 "${newSha256}"`);
+            fs.writeFileSync('Formula/pi.rb', updated);
+
+            core.setOutput('needs_update', 'true');
+            core.setOutput('current', currentVersion);
+            core.setOutput('latest', latestVersion);
 
       - name: Create pull request
-        if: steps.check.outputs.needs_update == 'true'
+        if: steps.update.outputs.needs_update == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
-          branch: bump-pi-${{ steps.check.outputs.latest }}
-          commit-message: "chore: update from ${{ steps.check.outputs.current }} to ${{ steps.check.outputs.latest }}"
-          title: "chore: update from ${{ steps.check.outputs.current }} to ${{ steps.check.outputs.latest }}"
-          body: "Automated bump of `pi` formula to [v${{ steps.check.outputs.latest }}](https://www.npmjs.com/package/@earendil-works/pi-coding-agent/v/${{ steps.check.outputs.latest }})."
+          branch: bump-pi-${{ steps.update.outputs.latest }}
+          commit-message: "chore: bump pi ${{ steps.update.outputs.current }} -> ${{ steps.update.outputs.latest }}"
+          title: "chore: bump pi ${{ steps.update.outputs.current }} -> ${{ steps.update.outputs.latest }}"
+          body: "Automated bump of `pi` formula to [v${{ steps.update.outputs.latest }}](https://www.npmjs.com/package/@earendil-works/pi-coding-agent/v/${{ steps.update.outputs.latest }})."
