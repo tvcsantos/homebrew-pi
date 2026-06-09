@@ -50,7 +50,7 @@ jobs:
         run: |
           CURRENT_URL=$(grep -oP '^\s*url\s+"\K[^"]+' Formula/pi.rb)
           PACKAGE_NAME=$(echo "$CURRENT_URL" | sed -n 's|.*/\(@[^/]*/[^/]*\)/-/.*|\1|p')
-          NEW_URL=$(npm view "${PACKAGE_NAME}@${NEW_VERSION}" dist.tarball)
+          NEW_URL=$(npm view "${PACKAGE_NAME}@${NEW_VERSION}" dist.tarball | tr -d '\n')
           NEW_SHA256=$(wget -qO- "$NEW_URL" | shasum -a 256 | awk '{print $1}')
 
           sed -i "s|${CURRENT_URL}|${NEW_URL}|" Formula/pi.rb
