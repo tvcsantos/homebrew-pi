@@ -1,8 +1,8 @@
 class Pi < Formula
   desc "Coding agent CLI with read, bash, edit, write tools and session management"
   homepage "https://pi.dev"
-  url "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.79.0.tgz"
-  sha256 "6542796e34f2cdb3617d296c3ca4e923572cf4e0073a59be45cf9a0c0f9b7263"
+  url "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.82.0.tgz"
+  sha256 "a9c9d7f861a7508af5e516d493a03eac1fef36f8b56fb0d204da643950e5db08"
   license "MIT"
 
   livecheck do
